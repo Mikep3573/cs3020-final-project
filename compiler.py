@@ -64,6 +64,7 @@ class Callable:
     args: List[type]
     output_type: type
 
+
 @dataclass
 class DataclassType:
     name: str
@@ -117,9 +118,11 @@ def typecheck(program: Program) -> Program:
                     raise Exception('tc_exp', e)
             case Call(e1, args):
                 c_type = env[e1.name]
+                print(c_type)
                 assert isinstance(c_type, Callable)
-                for i in range(len(args)):
-                    assert tc_exp(args[i], env) == c_type.args[i]
+                if isinstance(c_type, Callable):
+                    for i in range(len(args)):
+                        assert tc_exp(args[i], env) == c_type.args[i]
                 return c_type.output_type
             case FieldRef(e1, field_name):
                 # Typecheck e1
@@ -179,14 +182,13 @@ def typecheck(program: Program) -> Program:
                 function_names.add(name)
             case ClassDef(name, superclass, body):
                 # Create DataclassType and add it to global dictionary
-                field_types = {}
+                types = [a[1] for a in body]
                 fields = {}
-                for arg in body:
-                    fields[arg[0]] = None
-                    field_types[arg[0]] = arg[1]
-                # TODO: This is wrong, needs to adhere to both Call and FieldRef cases in tc_exp
-                # not sure how i can do that
-                env[name] = Callable(args=field_types,
+                field_types = {}
+                for i in range(len(body)):
+                    fields[body[i][0]] = None
+                    field_types[body[i][0]] = body[i][1]
+                env[name] = Callable(args=types,
                                      output_type=DataclassType(name=name, fields=fields, field_types=field_types))
                 return env[name]
             case While(condition, body):
@@ -275,6 +277,8 @@ def rco(prog: Program) -> Program:
             case FunctionDef(name, args, body_stmts, return_type):
                 new_stmts = rco_stmts(body_stmts)
                 return FunctionDef(name, args, new_stmts, return_type)
+            case ClassDef(name, superclass, body):
+                return ClassDef(name, superclass, body)
             case Return(e1):
                 return Return(rco_exp(e1, bindings))
             case _:
@@ -319,16 +323,76 @@ def rco(prog: Program) -> Program:
                 new_v = gensym('tmp')
                 bindings[new_v] = new_e
                 return Var(new_v)
+            case FieldRef(e1, field_name):
+                new_exp = rco_exp(e1, bindings)
+                return FieldRef(new_exp, field_name)
             case _:
                 raise Exception('rco_exp', e)
 
     return Program(rco_stmts(prog.stmts))
 
+
 ##################################################
 # compile dataclasses
 ##################################################
 def compile_dataclasses(prog: Program) -> Program:
-    return prog
+    def cd_stmts(stmts: List[Stmt]) -> List[Stmt]:
+        new_stmts = []
+        for stmt in stmts:
+            new_stmts.append(cd_stmt(stmt))
+        return new_stmts
+
+    def cd_stmt(stmt: Stmt) -> Stmt:
+        match stmt:
+            case Assign(x, e1):
+                new_e1 = cd_exp(e1)
+                return Assign(x, new_e1)
+            case Print(e1):
+                new_e1 = cd_exp(e1)
+                return Print(new_e1)
+            case While(condition, body_stmts):
+                condition_exp = cd_exp(condition)
+                new_condition = Begin(condition, condition_exp)
+                new_body_stmts = cd_stmts(body_stmts)
+                return While(new_condition, new_body_stmts)
+            case If(condition, then_stmts, else_stmts):
+                new_condition = cd_exp(condition)
+                new_then_stmts = cd_stmts(then_stmts)
+                new_else_stmts = cd_stmts(else_stmts)
+
+                return If(new_condition,
+                          new_then_stmts,
+                          new_else_stmts)
+            case FunctionDef(name, args, body_stmts, return_type):
+                new_stmts = cd_stmts(body_stmts)
+                return FunctionDef(name, args, new_stmts, return_type)
+            case ClassDef(name, superclass, body):
+                return stmt
+            case Return(e1):
+                return Return(cd_exp(e1))
+            case _:
+                raise Exception('cd_stmt', stmt)
+
+    def cd_exp(e: Expr) -> Expr:
+        match e:
+            case Var(x):
+                return e
+            case Constant(i):
+                return e
+            case Call(e1, args):
+                # if e1 in dataclass_var_types:
+                #     pass
+                # else:
+                #     return e
+            case Prim(op, args):
+                return e
+            case FieldRef(e1, field_name):
+                # new_exp = Prim()
+                # return FieldRef(new_exp, field_name)
+            case _:
+                raise Exception('rco_exp', e)
+
+    return Program(cd_stmts(prog.stmts))
 
 
 ##################################################
