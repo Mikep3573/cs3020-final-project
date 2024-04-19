@@ -1,4 +1,8 @@
-def add1(n: int) -> int:
-    return n + 1
+class Point:
+    x: int
+    y: int
 
-print(add1(5))
+
+p = Point(1, 2)
+v = p.x + p.y
+print(v)

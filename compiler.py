@@ -15,6 +15,7 @@ gensym_num = 0
 global_logging = False
 
 tuple_var_types = {}
+dataclass_var_types = {}
 function_names = set()
 
 
@@ -62,6 +63,12 @@ TEnv = Dict[str, type]
 class Callable:
     args: List[type]
     output_type: type
+
+@dataclass
+class DataclassType:
+    name: str
+    fields: Dict[str, any]
+    field_types: Dict[str, type]
 
 
 def typecheck(program: Program) -> Program:
@@ -114,6 +121,12 @@ def typecheck(program: Program) -> Program:
                 for i in range(len(args)):
                     assert tc_exp(args[i], env) == c_type.args[i]
                 return c_type.output_type
+            case FieldRef(e1, field_name):
+                # Typecheck e1
+                e1_type = tc_exp(e1, env)
+                assert isinstance(e1_type, DataclassType)
+                # Return the type that 'field_name' has in the DataclassType for e1
+                return e1_type.field_types[field_name]
             case Begin(stmts, exp):
                 tc_stmts(stmts, env)
                 return tc_exp(exp, env)
@@ -164,6 +177,16 @@ def typecheck(program: Program) -> Program:
 
                 # Add name to the global set function_names to remember that it's a function name
                 function_names.add(name)
+            case ClassDef(name, superclass, body):
+                # Create DataclassType and add it to global dictionary
+                field_types = {}
+                fields = {}
+                for arg in body:
+                    fields[arg[0]] = None
+                    field_types[arg[0]] = arg[1]
+                env[name] = Callable(args=field_types,
+                                     output_type=DataclassType(name=name, fields=fields, field_types=field_types))
+                return env[name]
             case While(condition, body):
                 # Check condition is well-typed
                 assert tc_exp(condition, env) == bool
@@ -196,6 +219,9 @@ def typecheck(program: Program) -> Program:
     for v, t in env.items():
         if isinstance(t, tuple):
             tuple_var_types[v] = t
+        # Add dataclasses to global dictionary
+        elif isinstance(t, DataclassType):
+            dataclass_var_types[v] = t
     return program
 
 
@@ -295,6 +321,12 @@ def rco(prog: Program) -> Program:
                 raise Exception('rco_exp', e)
 
     return Program(rco_stmts(prog.stmts))
+
+##################################################
+# compile dataclasses
+##################################################
+def compile_dataclasses(prog: Program) -> Program:
+    return prog
 
 
 ##################################################
@@ -623,7 +655,6 @@ Coloring = Dict[x86.Var, Color]
 Saturation = Set[Color]
 
 
-# TODO: This may be wrong -> getting different registers from online compiler
 def allocate_registers(program: X86ProgramDefs) -> X86ProgramDefs:
     """
     Assigns homes to variables in the input program. Allocates registers and
@@ -1079,6 +1110,7 @@ compiler_passes = {
     'typecheck': typecheck,
     'remove complex opera*': rco,
     'typecheck2': typecheck,
+    'compile dataclasses': compile_dataclasses,
     'explicate control': explicate_control,
     'select instructions': select_instructions,
     'allocate registers': allocate_registers,

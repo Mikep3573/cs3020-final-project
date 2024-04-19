@@ -16,7 +16,7 @@ run_gcc = False
 if len(sys.argv) == 2 and sys.argv[1] == '--run-gcc':
     run_gcc = True
 
-for file_name in sorted(os.listdir('/tests')):
+for file_name in sorted(os.listdir('tests')):
     if file_name.endswith('.py'):
         with open('tests/' + file_name) as f:
             print(f'Testing program {file_name}...')
