@@ -184,6 +184,8 @@ def typecheck(program: Program) -> Program:
                 for arg in body:
                     fields[arg[0]] = None
                     field_types[arg[0]] = arg[1]
+                # TODO: This is wrong, needs to adhere to both Call and FieldRef cases in tc_exp
+                # not sure how i can do that
                 env[name] = Callable(args=field_types,
                                      output_type=DataclassType(name=name, fields=fields, field_types=field_types))
                 return env[name]
