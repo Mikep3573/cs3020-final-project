@@ -118,11 +118,14 @@ def typecheck(program: Program) -> Program:
                     raise Exception('tc_exp', e)
             case Call(e1, args):
                 c_type = env[e1.name]
-                print(c_type)
                 assert isinstance(c_type, Callable)
-                if isinstance(c_type, Callable):
+                for i in range(len(args)):
+                    assert tc_exp(args[i], env) == c_type.args[i]
+                if isinstance(c_type.output_type, DataclassType):
+                    dataclass = c_type.output_type
+                    dataclass_fields = list(dataclass.fields.keys())
                     for i in range(len(args)):
-                        assert tc_exp(args[i], env) == c_type.args[i]
+                        dataclass.fields[dataclass_fields[i]] = args[i]
                 return c_type.output_type
             case FieldRef(e1, field_name):
                 # Typecheck e1
@@ -339,24 +342,30 @@ def compile_dataclasses(prog: Program) -> Program:
     def cd_stmts(stmts: List[Stmt]) -> List[Stmt]:
         new_stmts = []
         for stmt in stmts:
-            new_stmts.append(cd_stmt(stmt))
+            bindings = {}
+            if isinstance(stmt, ClassDef):
+                pass
+            else:
+                new_stmt = cd_stmt(stmt, bindings)
+                new_stmts.extend([Assign(x, e) for x, e in bindings.items()])
+                new_stmts.append(new_stmt)
         return new_stmts
 
-    def cd_stmt(stmt: Stmt) -> Stmt:
+    def cd_stmt(stmt: Stmt, bindings: Dict[str, Expr]) -> Stmt:
         match stmt:
             case Assign(x, e1):
-                new_e1 = cd_exp(e1)
+                new_e1 = cd_exp(e1, bindings)
                 return Assign(x, new_e1)
             case Print(e1):
-                new_e1 = cd_exp(e1)
+                new_e1 = cd_exp(e1, bindings)
                 return Print(new_e1)
             case While(condition, body_stmts):
-                condition_exp = cd_exp(condition)
+                condition_exp = cd_exp(condition, bindings)
                 new_condition = Begin(condition, condition_exp)
                 new_body_stmts = cd_stmts(body_stmts)
                 return While(new_condition, new_body_stmts)
             case If(condition, then_stmts, else_stmts):
-                new_condition = cd_exp(condition)
+                new_condition = cd_exp(condition, bindings)
                 new_then_stmts = cd_stmts(then_stmts)
                 new_else_stmts = cd_stmts(else_stmts)
 
@@ -366,33 +375,39 @@ def compile_dataclasses(prog: Program) -> Program:
             case FunctionDef(name, args, body_stmts, return_type):
                 new_stmts = cd_stmts(body_stmts)
                 return FunctionDef(name, args, new_stmts, return_type)
-            case ClassDef(name, superclass, body):
-                return stmt
             case Return(e1):
-                return Return(cd_exp(e1))
+                return Return(cd_exp(e1, bindings))
             case _:
                 raise Exception('cd_stmt', stmt)
 
-    def cd_exp(e: Expr) -> Expr:
+    def cd_exp(e: Expr, bindings: Dict[str, Expr]) -> Expr:
         match e:
             case Var(x):
                 return e
             case Constant(i):
                 return e
             case Call(e1, args):
-                # if e1 in dataclass_var_types:
-                #     pass
-                # else:
-                #     return e
+                if e1.name not in tuple_var_types.keys():
+                    return Prim('tuple', args)
+                else:
+                    return e
             case Prim(op, args):
-                return e
+                new_args = [cd_exp(a, bindings) for a in args]
+                return Prim(op, new_args)
             case FieldRef(e1, field_name):
-                # new_exp = Prim()
-                # return FieldRef(new_exp, field_name)
+                fs = list(dataclass_var_types[e1.name].fields.keys())
+                for i in range(len(fs)):
+                    if fs[i] == field_name:
+                        new_var = gensym('tmp')
+                        bindings[new_var] = Prim('subscript', [e1, Constant(i)])
+                        return Var(new_var)
             case _:
                 raise Exception('rco_exp', e)
 
-    return Program(cd_stmts(prog.stmts))
+    new_stmts = cd_stmts(prog.stmts)
+    for k, v in dataclass_var_types.items():
+        tuple_var_types[k] = tuple(f.val for f in v.fields.values())
+    return Program(new_stmts)
 
 
 ##################################################
