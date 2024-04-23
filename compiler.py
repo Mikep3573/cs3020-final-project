@@ -1,7 +1,5 @@
 from typing import Set, Dict
 import itertools
-from unittest import case
-
 import print_x86defs
 import sys
 import traceback
@@ -45,6 +43,43 @@ def gensym(x):
     gensym_num = gensym_num + 1
     return f'{x}_{gensym_num}'
 
+
+##################################################
+# unnest funcs
+##################################################
+def unnest_funcs(program: Program) -> Program:
+    new_stmts = []
+    funcs = []
+    for stmt in program.stmts:
+        match stmt:
+            case ClassDef(name, superclass, body):
+                class_body = []
+                for stmt in body:
+                    match stmt:
+                        case FunctionDef(name, args, body_stmts, return_type):
+                            funcs.append(stmt)
+                        case _:
+                            class_body.append(stmt)
+
+                #     name: str
+                #     fields: Dict[str, any]
+                #     field_types: Dict[str, type]
+                new_stmts.append(ClassDef(name, superclass, class_body))
+                for func in funcs:
+                    for param in func.params:
+                        if param[1] == name:
+                            fields = {}
+                            field_types = {}
+                            for i in range(len(body)):
+                                fields[body[i][0]] = None
+                                field_types[body[i][0]] = body[i][1]
+                            param[1] = DataclassType(name, fields, field_types)
+                new_stmts.extend(funcs)
+                funcs = []
+            case _:
+                new_stmts.append(stmt)
+
+    return Program(new_stmts)
 
 ##################################################
 # typecheck
@@ -132,6 +167,7 @@ def typecheck(program: Program) -> Program:
             case FieldRef(e1, field_name):
                 # Typecheck e1
                 e1_type = tc_exp(e1, env)
+                print(e1_type)
                 assert isinstance(e1_type, DataclassType)
                 # Return the type that 'field_name' has in the DataclassType for e1
                 return e1_type.field_types[field_name]
@@ -189,43 +225,12 @@ def typecheck(program: Program) -> Program:
                 # Create DataclassType and add it to global dictionary
                 types = []
                 for a in body:
-                    match a:
-                        case FunctionDef(name, args, body_stmts, return_type):
-                            # Add a binding to the original type environment of the form:
-                            # name -> Callable[[t1, ..., tk], return_type]
-                            arg_types = [ for a in args]
-                            env[name] = Callable(arg_types, return_type)
-
-                            # Make a copy of the current env
-                            env_copy = {}
-                            for k, i in env.items():
-                                env_copy[k] = i
-
-                            # Add a binding ai -> ti to the env copy for each argument ai and its type ti
-                            for i in range(len(args)):
-                                env_copy[args[i][0]] = args[i][1]
-
-                            # Add a binding 'return_type' -> return_type to the env copy
-                            env_copy['return_type'] = return_type
-
-                            # Typecheck the body stmts using tc_stmt with the env copy
-                            tc_stmts(body_stmts, env_copy)
-
-                            # Add any tuples to tuple_var_types
-                            for v, t in env_copy.items():
-                                if isinstance(t, tuple):
-                                    tuple_var_types[v] = t
-
-                            # Add name to the global set function_names to remember that it's a function name
-                            function_names.add(name)
-                        case _:
-                            types.append(a[1])
+                    types.append(a[1])
                 fields = {}
                 field_types = {}
                 for i in range(len(body)):
-                    if not isinstance(body[i], FunctionDef):
-                        fields[body[i][0]] = None
-                        field_types[body[i][0]] = body[i][1]
+                    fields[body[i][0]] = None
+                    field_types[body[i][0]] = body[i][1]
                 env[name] = Callable(args=types,
                                      output_type=DataclassType(name=name, fields=fields, field_types=field_types))
                 return env[name]
@@ -1223,6 +1228,7 @@ def add_allocate(program: str) -> str:
 ##################################################
 
 compiler_passes = {
+    'unnest funcs': unnest_funcs,
     'typecheck': typecheck,
     'remove complex opera*': rco,
     'typecheck2': typecheck,
