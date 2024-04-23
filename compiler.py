@@ -1,5 +1,7 @@
 from typing import Set, Dict
 import itertools
+from unittest import case
+
 import print_x86defs
 import sys
 import traceback
@@ -185,12 +187,45 @@ def typecheck(program: Program) -> Program:
                 function_names.add(name)
             case ClassDef(name, superclass, body):
                 # Create DataclassType and add it to global dictionary
-                types = [a[1] for a in body]
+                types = []
+                for a in body:
+                    match a:
+                        case FunctionDef(name, args, body_stmts, return_type):
+                            # Add a binding to the original type environment of the form:
+                            # name -> Callable[[t1, ..., tk], return_type]
+                            arg_types = [ for a in args]
+                            env[name] = Callable(arg_types, return_type)
+
+                            # Make a copy of the current env
+                            env_copy = {}
+                            for k, i in env.items():
+                                env_copy[k] = i
+
+                            # Add a binding ai -> ti to the env copy for each argument ai and its type ti
+                            for i in range(len(args)):
+                                env_copy[args[i][0]] = args[i][1]
+
+                            # Add a binding 'return_type' -> return_type to the env copy
+                            env_copy['return_type'] = return_type
+
+                            # Typecheck the body stmts using tc_stmt with the env copy
+                            tc_stmts(body_stmts, env_copy)
+
+                            # Add any tuples to tuple_var_types
+                            for v, t in env_copy.items():
+                                if isinstance(t, tuple):
+                                    tuple_var_types[v] = t
+
+                            # Add name to the global set function_names to remember that it's a function name
+                            function_names.add(name)
+                        case _:
+                            types.append(a[1])
                 fields = {}
                 field_types = {}
                 for i in range(len(body)):
-                    fields[body[i][0]] = None
-                    field_types[body[i][0]] = body[i][1]
+                    if not isinstance(body[i], FunctionDef):
+                        fields[body[i][0]] = None
+                        field_types[body[i][0]] = body[i][1]
                 env[name] = Callable(args=types,
                                      output_type=DataclassType(name=name, fields=fields, field_types=field_types))
                 return env[name]
