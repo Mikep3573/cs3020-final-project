@@ -44,42 +44,6 @@ def gensym(x):
     return f'{x}_{gensym_num}'
 
 
-##################################################
-# unnest funcs
-##################################################
-def unnest_funcs(program: Program) -> Program:
-    new_stmts = []
-    funcs = []
-    for stmt in program.stmts:
-        match stmt:
-            case ClassDef(name, superclass, body):
-                class_body = []
-                for stmt in body:
-                    match stmt:
-                        case FunctionDef(name, args, body_stmts, return_type):
-                            funcs.append(stmt)
-                        case _:
-                            class_body.append(stmt)
-
-                #     name: str
-                #     fields: Dict[str, any]
-                #     field_types: Dict[str, type]
-                new_stmts.append(ClassDef(name, superclass, class_body))
-                for func in funcs:
-                    for param in func.params:
-                        if param[1] == name:
-                            fields = {}
-                            field_types = {}
-                            for i in range(len(body)):
-                                fields[body[i][0]] = None
-                                field_types[body[i][0]] = body[i][1]
-                            param[1] = DataclassType(name, fields, field_types)
-                new_stmts.extend(funcs)
-                funcs = []
-            case _:
-                new_stmts.append(stmt)
-
-    return Program(new_stmts)
 
 ##################################################
 # typecheck
@@ -154,7 +118,10 @@ def typecheck(program: Program) -> Program:
                 else:
                     raise Exception('tc_exp', e)
             case Call(e1, args):
-                c_type = env[e1.name]
+                if isinstance(e1, FieldRef):
+                    c_type = env[e1.field]
+                else:
+                    c_type = env[e1.name]
                 assert isinstance(c_type, Callable)
                 for i in range(len(args)):
                     assert tc_exp(args[i], env) == c_type.args[i]
@@ -167,7 +134,8 @@ def typecheck(program: Program) -> Program:
             case FieldRef(e1, field_name):
                 # Typecheck e1
                 e1_type = tc_exp(e1, env)
-                print(e1_type)
+                if isinstance(e1_type, Callable):
+                    e1_type = e1_type.output_type
                 assert isinstance(e1_type, DataclassType)
                 # Return the type that 'field_name' has in the DataclassType for e1
                 return e1_type.field_types[field_name]
@@ -206,7 +174,10 @@ def typecheck(program: Program) -> Program:
 
                 # Add a binding ai -> ti to the env copy for each argument ai and its type ti
                 for i in range(len(args)):
-                    env_copy[args[i][0]] = args[i][1]
+                    if args[i][0] == int or args[i][0] == bool or args[i][0] == str or args[i][0] == tuple:
+                        env_copy[args[i][0]] = args[i][1]
+                    else:
+                        env_copy[args[i][0]] = env[args[i][0]]
 
                 # Add a binding 'return_type' -> return_type to the env copy
                 env_copy['return_type'] = return_type
@@ -222,17 +193,31 @@ def typecheck(program: Program) -> Program:
                 # Add name to the global set function_names to remember that it's a function name
                 function_names.add(name)
             case ClassDef(name, superclass, body):
-                # Create DataclassType and add it to global dictionary
+                # Create DataclassType and add it to global dictionary, first ignoring methods
                 types = []
+                to_check = []
                 for a in body:
-                    types.append(a[1])
+                    if not isinstance(a, FunctionDef):
+                        types.append(a[1])
+                    else:
+                        to_check.append(a)
                 fields = {}
                 field_types = {}
                 for i in range(len(body)):
-                    fields[body[i][0]] = None
-                    field_types[body[i][0]] = body[i][1]
+                    if not isinstance(body[i], FunctionDef):
+                        fields[body[i][0]] = None
+                        field_types[body[i][0]] = body[i][1]
                 env[name] = Callable(args=types,
                                      output_type=DataclassType(name=name, fields=fields, field_types=field_types))
+                # Typecheck the methods
+                for func in to_check:
+                    # Change the parameter to be env[name]
+                    for i in range(len(func.params)):
+                        if func.params[i][0] == "self":
+                            env[func.params[i][0]] = Callable(args=types,
+                                     output_type=DataclassType(name=name, fields=fields, field_types=field_types))
+                    tc_stmt(func, env)
+
                 return env[name]
             case While(condition, body):
                 # Check condition is well-typed
@@ -1228,7 +1213,6 @@ def add_allocate(program: str) -> str:
 ##################################################
 
 compiler_passes = {
-    'unnest funcs': unnest_funcs,
     'typecheck': typecheck,
     'remove complex opera*': rco,
     'typecheck2': typecheck,
