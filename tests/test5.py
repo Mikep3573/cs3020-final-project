@@ -20,4 +20,4 @@ class Mark:
 
 p = Point(1, 2)
 m = Mark(3, 4)
-print(p.add() + m.add())
+print(p.add() + m.mult())

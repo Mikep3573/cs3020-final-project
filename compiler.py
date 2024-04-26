@@ -1,3 +1,4 @@
+import dataclasses
 from typing import Set, Dict
 import itertools
 import print_x86defs
@@ -218,6 +219,8 @@ def typecheck(program: Program) -> Program:
                                      output_type=DataclassType(name=name, fields=fields, field_types=field_types))
                     tc_stmt(func, env)
 
+                    # Add the methods into the fields of DataclassType
+                    env[name].output_type.fields[func.name] = func
                 return env[name]
             case While(condition, body):
                 # Check condition is well-typed
@@ -412,10 +415,28 @@ def compile_dataclasses(prog: Program) -> Program:
             case Constant(i):
                 return e
             case Call(e1, args):
-                if e1.name not in tuple_var_types.keys():
-                    return Prim('tuple', args)
+                if isinstance(e1, Var):
+                    if e1.name not in tuple_var_types.keys():
+                        new_args = []
+                        new_args.extend(args)
+                        found = False
+                        for val in dataclass_var_types.values():
+                            if val.name == e1.name and not found:
+                                found = True
+                                for v in val.fields.values():
+                                    if isinstance(v, FunctionDef):
+                                        new_args.append(Var(v.name))
+                        return Prim('tuple', new_args)
+                    else:
+                        return e
                 else:
-                    return e
+                    if e1.lhs.name in dataclass_var_types:
+                        fs = list(dataclass_var_types[e1.lhs.name].fields.keys())
+                        for i in range(len(fs)):
+                            if fs[i] == e1.field:
+                                return Call(Prim('subscript', [Var(e1.lhs.name), Constant(i)]), args)
+                    else:
+                        return e
             case Prim(op, args):
                 new_args = [cd_exp(a, bindings) for a in args]
                 return Prim(op, new_args)
@@ -431,7 +452,13 @@ def compile_dataclasses(prog: Program) -> Program:
 
     new_stmts = cd_stmts(prog.stmts)
     for k, v in dataclass_var_types.items():
-        tuple_var_types[k] = tuple(f.val for f in v.fields.values())
+        new_vals = []
+        for f in v.fields.values():
+            if isinstance(f, FunctionDef):
+                new_vals.append(f.name)
+            else:
+                new_vals.append(f.val)
+        tuple_var_types[k] = tuple(new_vals)
     return Program(new_stmts)
 
 
@@ -497,6 +524,9 @@ def _explicate_control(current_function: str, prog: Program) -> Dict[str, List[c
                 return cif.Var(x)
             case Constant(c):
                 return cif.Constant(c)
+            case Prim('subscript', args):
+                new_args = [explicate_atm(arg) for arg in args]
+                return cif.Prim('subscript', new_args)
             case _:
                 raise RuntimeError(e)
 
@@ -668,6 +698,8 @@ def _select_instructions(current_function: str, blocks: Dict[str, cif.Stmt]) -> 
 
     def si_stmt(stmt: cif.Stmt) -> List[x86.Instr]:
         match stmt:
+            case cif.Assign(x, cif.Call(cif.Prim(op, [atm1, atm2]), args)):
+                pass
             case cif.Assign(x, cif.Call(f, args)):
                 instrs = []
                 # Save caller-saved registers
