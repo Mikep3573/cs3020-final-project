@@ -45,6 +45,28 @@ def gensym(x):
     return f'{x}_{gensym_num}'
 
 
+##################################################
+# unnestify
+##################################################
+def unnestify(prog: Program) -> Program:
+    new_stmts = []
+    print(dataclass_var_types.keys())
+    for stmt in prog.stmts:
+        match stmt:
+            case ClassDef(name, superclass, body):
+                new_body = []
+                funcs = []
+                for bod in body:
+                    match bod:
+                        case FunctionDef(nam, params, bo, return_type):
+                            funcs.append(bod)
+                        case _:
+                            new_body.append(bod)
+                new_stmts.append(ClassDef(name, superclass, new_body))
+                new_stmts.extend(funcs)
+            case _:
+                new_stmts.append(stmt)
+    return Program(new_stmts)
 
 ##################################################
 # typecheck
@@ -165,7 +187,12 @@ def typecheck(program: Program) -> Program:
             case FunctionDef(name, args, body_stmts, return_type):
                 # Add a binding to the original type environment of the form:
                 # name -> Callable[[t1, ..., tk], return_type]
-                arg_types = [a[1] for a in args]
+                arg_types = []
+                for arg in args:
+                    if arg[1] != str or arg[1] != int or arg[1] != bool or arg[1] != tuple:
+                        arg_types.append(env[arg[1]])
+                    else:
+                        arg_types.append(arg[1])
                 env[name] = Callable(arg_types, return_type)
 
                 # Make a copy of the current env
@@ -175,10 +202,10 @@ def typecheck(program: Program) -> Program:
 
                 # Add a binding ai -> ti to the env copy for each argument ai and its type ti
                 for i in range(len(args)):
-                    if args[i][0] == int or args[i][0] == bool or args[i][0] == str or args[i][0] == tuple:
-                        env_copy[args[i][0]] = args[i][1]
+                    if args[i][1] != str or args[i][1] != int or args[i][1] != bool or args[i][1] != tuple:
+                        env_copy[args[i][0]] = env[args[i][1]]
                     else:
-                        env_copy[args[i][0]] = env[args[i][0]]
+                        env_copy[args[i][0]] = args[i][1]
 
                 # Add a binding 'return_type' -> return_type to the env copy
                 env_copy['return_type'] = return_type
@@ -214,7 +241,7 @@ def typecheck(program: Program) -> Program:
                 for func in to_check:
                     # Change the parameter to be env[name]
                     for i in range(len(func.params)):
-                        if func.params[i][0] == "self":
+                        if func.params[i][0].startswith("self"):
                             env[func.params[i][0]] = Callable(args=types,
                                      output_type=DataclassType(name=name, fields=fields, field_types=field_types))
                     tc_stmt(func, env)
@@ -1245,6 +1272,7 @@ def add_allocate(program: str) -> str:
 ##################################################
 
 compiler_passes = {
+    'unnestify': unnestify,
     'typecheck': typecheck,
     'remove complex opera*': rco,
     'typecheck2': typecheck,
