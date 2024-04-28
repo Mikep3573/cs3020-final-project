@@ -217,6 +217,12 @@ def typecheck(program: Program) -> Program:
                 for v, t in env_copy.items():
                     if isinstance(t, tuple):
                         tuple_var_types[v] = t
+                    elif isinstance(t, Callable):
+                        t_out = t.output_type
+                        if isinstance(t_out, DataclassType):
+                            dataclass_var_types[v] = t
+
+
 
                 # Add name to the global set function_names to remember that it's a function name
                 function_names.add(name)
