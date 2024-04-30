@@ -50,7 +50,7 @@ def gensym(x):
 ##################################################
 def unnestify(prog: Program) -> Program:
     new_stmts = []
-    print(dataclass_var_types.keys())
+    #print(dataclass_var_types.keys())
     for stmt in prog.stmts:
         match stmt:
             case ClassDef(name, superclass, body):
@@ -410,6 +410,8 @@ def compile_dataclasses(prog: Program) -> Program:
                 new_stmt = cd_stmt(stmt, bindings)
                 new_stmts.extend([Assign(x, e) for x, e in bindings.items()])
                 new_stmts.append(new_stmt)
+                #print(stmt)
+                #print(new_stmt)
         return new_stmts
 
     def cd_stmt(stmt: Stmt, bindings: Dict[str, Expr]) -> Stmt:
@@ -448,52 +450,96 @@ def compile_dataclasses(prog: Program) -> Program:
             case Constant(i):
                 return e
             case Call(e1, args):
+                #print("e1")
+                #print(e1)
+                #print("args")
+                #print(args)
                 if isinstance(e1, Var):
                     if e1.name not in tuple_var_types.keys():
                         new_args = []
                         new_args.extend(args)
+                        #print("new_args")
+                        #print(new_args)
                         found = False
+                        #print(e1)
                         for val in dataclass_var_types.values():
-                            if val.name == e1.name and not found:
-                                found = True
-                                for v in val.fields.values():
-                                    if isinstance(v, FunctionDef):
-                                        new_args.append(Var(v.name))
+                            #print(val)
+                            if isinstance(val, Callable):
+                                #print(val.output_type.name)
+                                #print(e1)
+                                if val.output_type.name == e1.name and not found:
+                                    found = True
+                                    for v in val.output_type.fields.values():
+                                        if isinstance(v, FunctionDef):
+                                            new_args.append(Var(v.name))
+                            if isinstance(val, DataclassType):
+                                if val.name == e1.name and not found:
+                                    found = True
+                                    for v in val.fields.values():
+                                        if isinstance(v, FunctionDef):
+                                            new_args.append(Var(v.name))
                         return Prim('tuple', new_args)
                     else:
                         return e
                 else:
                     if e1.lhs.name in dataclass_var_types:
                         fs = list(dataclass_var_types[e1.lhs.name].fields.keys())
+                        #print(fs)
                         for i in range(len(fs)):
                             if fs[i] == e1.field:
+                                #print("Returning Prim subscipt")
                                 return Call(Prim('subscript', [Var(e1.lhs.name), Constant(i)]), args)
+                        #print("returning default subscript")
+                        return Call(Prim('subscript', [Var(e1.lhs.name), Constant(0)]), args)
                     else:
                         return e
             case Prim(op, args):
                 new_args = [cd_exp(a, bindings) for a in args]
                 return Prim(op, new_args)
             case FieldRef(e1, field_name):
-                fs = list(dataclass_var_types[e1.name].fields.keys())
-                for i in range(len(fs)):
-                    if fs[i] == field_name:
-                        new_var = gensym('tmp')
-                        bindings[new_var] = Prim('subscript', [e1, Constant(i)])
-                        return Var(new_var)
+                #print(e1)
+                #print(dataclass_var_types[e1.name])
+                #print(e)
+                if isinstance(dataclass_var_types[e1.name], Callable):
+                    fs = list(dataclass_var_types[e1.name].output_type.fields.keys())
+                    for i in range(len(fs)):
+                        if fs[i] == field_name:
+                            new_var = gensym('tmp')
+                            bindings[new_var] = Prim('subscript', [e1, Constant(i)])
+                            return Var(new_var)
+                else:
+                    fs = list(dataclass_var_types[e1.name].fields.keys())
+                    for i in range(len(fs)):
+                        if fs[i] == field_name:
+                            new_var = gensym('tmp')
+                            bindings[new_var] = Prim('subscript', [e1, Constant(i)])
+                            return Var(new_var)
+                new_var = gensym('tmp')
+                bindings[new_var] = Prim('subscript', [e1, Constant(0)])
+                return Var(new_var)
             case _:
                 raise Exception('rco_exp', e)
 
     new_stmts = cd_stmts(prog.stmts)
     for k, v in dataclass_var_types.items():
         new_vals = []
-        for f in v.fields.values():
-            if isinstance(f, FunctionDef):
-                new_vals.append(f.name)
-            else:
-                new_vals.append(f.val)
+        #print(k)
+        #print(v)
+        if isinstance(v, Callable):
+            for f in v.output_type.fields.values():
+                if isinstance(f, FunctionDef):
+                    new_vals.append(f.name)
+                else:
+                    new_vals.append(f.val)
+        if isinstance(v, DataclassType):
+            for f in v.fields.values():
+                if isinstance(f, FunctionDef):
+                    new_vals.append(f.name)
+                else:
+                    new_vals.append(f.val)
         tuple_var_types[k] = tuple(new_vals)
+    #print(new_stmts)
     return Program(new_stmts)
-
 
 ##################################################
 # explicate-control
@@ -721,6 +767,7 @@ def _select_instructions(current_function: str, blocks: Dict[str, cif.Stmt]) -> 
         instrs = []
 
         for stmt in stmts:
+            #print(stmt)
             instrs.extend(si_stmt(stmt))
 
         return instrs
@@ -732,8 +779,29 @@ def _select_instructions(current_function: str, blocks: Dict[str, cif.Stmt]) -> 
     def si_stmt(stmt: cif.Stmt) -> List[x86.Instr]:
         match stmt:
             case cif.Assign(x, cif.Call(cif.Prim(op, [atm1, atm2]), args)):
-                pass
+                #print("op")
+                #print(op)
+                instrs = []
+                # Save caller-saved registers
+                used_regs = []
+                for reg in constants.caller_saved_registers:
+                    instrs.append(x86.NamedInstr('pushq', [x86.Reg(reg)]))
+                # Move the arguments into parameter-passing registers
+                for i in range(len(args)):
+                    instrs.append(x86.NamedInstr('movq', [si_atm(args[i]), x86.Reg(constants.argument_registers[i])]))
+                # Add an indirect call
+                #print(stmt)
+                #print(atm1)
+                instrs.append(x86.IndirectCallq(si_atm(atm1), 0))
+                # Loop backwards in the used registers to pop them off stack
+                for i in range(len(constants.caller_saved_registers) - 1, -1, -1):
+                    instrs.append(x86.NamedInstr('popq', [x86.Reg(constants.caller_saved_registers[i])]))
+                # Move rax to x
+                instrs.append(x86.NamedInstr('movq', [x86.Reg('rax'), x86.Var(x)]))
+                return instrs
             case cif.Assign(x, cif.Call(f, args)):
+                #print("f")
+                #print(f)
                 instrs = []
                 # Save caller-saved registers
                 used_regs = []
