@@ -50,20 +50,40 @@ def gensym(x):
 ##################################################
 def unnestify(prog: Program) -> Program:
     new_stmts = []
+    methods = []
     #print(dataclass_var_types.keys())
     for stmt in prog.stmts:
         match stmt:
             case ClassDef(name, superclass, body):
                 new_body = []
                 funcs = []
+                #print(stmt)
                 for bod in body:
                     match bod:
                         case FunctionDef(nam, params, bo, return_type):
+                            #print(nam)
+                            #print(params)
+                            #print(bod)
                             funcs.append(bod)
+                            methods.append((nam, params, return_type))
+                            new_body.append((nam, return_type))
                         case _:
                             new_body.append(bod)
                 new_stmts.append(ClassDef(name, superclass, new_body))
                 new_stmts.extend(funcs)
+            case Assign(e, rhs):
+                match rhs:
+                    case Call(exp, args):
+                        new_args = args
+                        for method in methods:
+                            if exp.name == method[1][0][1]:
+                                new_args.append(Var(method[0]))
+                            #print(exp)
+                            #print(args)
+                            #print(method)
+                        new_stmts.append(Assign(e, Call(exp, new_args)))
+                    case _:
+                        new_stmts.append(stmt)
             case _:
                 new_stmts.append(stmt)
     return Program(new_stmts)
@@ -147,7 +167,12 @@ def typecheck(program: Program) -> Program:
                     c_type = env[e1.name]
                 assert isinstance(c_type, Callable)
                 for i in range(len(args)):
-                    assert tc_exp(args[i], env) == c_type.args[i]
+                    #print(tc_exp(args[i], env))
+                    #print(c_type.args[i])
+                    if isinstance(tc_exp(args[i], env), Callable):
+                        assert tc_exp(args[i], env).output_type == c_type.args[i]
+                    else:
+                        assert tc_exp(args[i], env) == c_type.args[i]
                 if isinstance(c_type.output_type, DataclassType):
                     dataclass = c_type.output_type
                     dataclass_fields = list(dataclass.fields.keys())
@@ -514,9 +539,9 @@ def compile_dataclasses(prog: Program) -> Program:
                             new_var = gensym('tmp')
                             bindings[new_var] = Prim('subscript', [e1, Constant(i)])
                             return Var(new_var)
-                new_var = gensym('tmp')
-                bindings[new_var] = Prim('subscript', [e1, Constant(0)])
-                return Var(new_var)
+                #new_var = gensym('tmp')
+                #bindings[new_var] = Prim('subscript', [e1, Constant(0)])
+                #return Var(new_var)
             case _:
                 raise Exception('rco_exp', e)
 
@@ -527,7 +552,10 @@ def compile_dataclasses(prog: Program) -> Program:
         #print(v)
         if isinstance(v, Callable):
             for f in v.output_type.fields.values():
+                #print(f)
                 if isinstance(f, FunctionDef):
+                    new_vals.append(f.name)
+                elif isinstance(f, Var):
                     new_vals.append(f.name)
                 else:
                     new_vals.append(f.val)
@@ -535,10 +563,12 @@ def compile_dataclasses(prog: Program) -> Program:
             for f in v.fields.values():
                 if isinstance(f, FunctionDef):
                     new_vals.append(f.name)
+                elif isinstance(f, Var):
+                    new_vals.append(f.name)
                 else:
                     new_vals.append(f.val)
         tuple_var_types[k] = tuple(new_vals)
-    #print(new_stmts)
+    #print(function_names)
     return Program(new_stmts)
 
 ##################################################
