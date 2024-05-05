@@ -214,7 +214,7 @@ def typecheck(program: Program) -> Program:
                 # name -> Callable[[t1, ..., tk], return_type]
                 arg_types = []
                 for arg in args:
-                    if arg[1] != str or arg[1] != int or arg[1] != bool or arg[1] != tuple:
+                    if arg[1] != str and arg[1] != int and arg[1] != bool and arg[1] != tuple:
                         arg_types.append(env[arg[1]])
                     else:
                         arg_types.append(arg[1])
@@ -227,7 +227,7 @@ def typecheck(program: Program) -> Program:
 
                 # Add a binding ai -> ti to the env copy for each argument ai and its type ti
                 for i in range(len(args)):
-                    if args[i][1] != str or args[i][1] != int or args[i][1] != bool or args[i][1] != tuple:
+                    if args[i][1] != str and args[i][1] != int and args[i][1] != bool and args[i][1] != tuple:
                         env_copy[args[i][0]] = env[args[i][1]]
                     else:
                         env_copy[args[i][0]] = args[i][1]
@@ -448,10 +448,8 @@ def compile_dataclasses(prog: Program) -> Program:
                 new_e1 = cd_exp(e1, bindings)
                 return Print(new_e1)
             case While(condition, body_stmts):
-                condition_exp = cd_exp(condition, bindings)
-                new_condition = Begin(condition, condition_exp)
                 new_body_stmts = cd_stmts(body_stmts)
-                return While(new_condition, new_body_stmts)
+                return While(condition, new_body_stmts)
             case If(condition, then_stmts, else_stmts):
                 new_condition = cd_exp(condition, bindings)
                 new_then_stmts = cd_stmts(then_stmts)

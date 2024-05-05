@@ -8,6 +8,6 @@ class Point:
     def mult(self2: Point) -> int:
         return self2.x * self2.y
 
-p = Point(1, 2)
-print(p.add())
-print(p.mult())
+p1 = Point(1, 2)
+print(p1.add(p1))
+print(p1.mult(p1))
