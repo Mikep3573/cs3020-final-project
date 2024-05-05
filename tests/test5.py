@@ -20,4 +20,4 @@ class Mark:
 
 p = Point(1, 2)
 m = Mark(3, 4)
-print(p.addPoint(p) + m.addMark(m))
+print(p.addPoint() + m.addMark())
